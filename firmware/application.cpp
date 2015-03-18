@@ -20,13 +20,17 @@
 #endif
 #define FAN_PIN     D0
 #define HEAT_PIN    D7
-#define POT_PIN     A6
+#define ENCODER_PIN_A D0
+#define ENCODER_PIN_B D1
 #define PIR_PIN     D3
 // #define USE_PIR     1
 #define DESIRED_TEMP_FLASH_ADDRESS 0x80000
 // #define USE_FAHRENHEIT
 #define	COLOR_HEATING   0xF800
 #define	COLOR_COOLING   0x001F
+#define TEMP_MIN  5
+#define TEMP_MAX  40
+#define TEMP_INCREMENT 0.1
 
 SYSTEM_MODE(SEMI_AUTOMATIC);
 
@@ -39,18 +43,49 @@ bool isFanOn = false;
 bool motionDetected = false;
 
 int lastChangedPot = -80;
-int i = 0;
+int lastCurrentTemperature = 0;
+int lastDesiredTemperature = 0;
+bool lastIsHeatOn = false;
+volatile int lastEncoded = 0;
+volatile float encoderValue = 0;
+
 void displayTemperature(void)
 {
-  if (isHeatOn) tft.fillScreen(COLOR_HEATING);
-  else tft.fillScreen(COLOR_COOLING);
+  bool forceRedraw = false || (lastChangedPot == -80);
+  if (lastIsHeatOn != isHeatOn) forceRedraw = true;
 
-  tft.drawXBitmap(43, 13, scale_bits, scale_width, scale_height, ILI9341_WHITE);
-  tft.setCursor(115, 95);
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(8);
-  // tft.println(desiredTemperature);
-  tft.println(currentTemperature);
+  if (forceRedraw) {
+    if (isHeatOn) tft.fillScreen(COLOR_HEATING);
+    else tft.fillScreen(COLOR_COOLING);
+  }
+
+  if ((lastCurrentTemperature != currentTemperature)
+      || (lastDesiredTemperature != desiredTemperature)
+      || forceRedraw) {
+    // Redraw scale
+    tft.drawXBitmap(43, 13, scale_bits, scale_width, scale_height, ILI9341_WHITE);
+  }
+
+  if ((lastDesiredTemperature != desiredTemperature)
+      || forceRedraw) {
+    // Redraw desired temperature
+    tft.setCursor(115, 95);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.setTextSize(8);
+    tft.println(desiredTemperature);
+  }
+
+  if (((lastCurrentTemperature != currentTemperature)
+      || forceRedraw) && currentTemperature > 0) {
+    // Redraw current temperature
+    tft.setCursor(140, 200);
+    tft.setTextSize(4);
+    tft.println(currentTemperature);
+  }
+
+  lastCurrentTemperature = currentTemperature;
+  lastDesiredTemperature = desiredTemperature;
+  lastIsHeatOn = isHeatOn;
 }
 
 void saveTemperature()
@@ -67,14 +102,16 @@ void loadTemperature()
   uint8_t values[2];
   sFLASH_ReadBuffer(values, DESIRED_TEMP_FLASH_ADDRESS, 2);
   desiredTemperature = values[0];
+  encoderValue = desiredTemperature;
   displayTemperature();
 }
 
 int setTemperature(int t)
 {
   desiredTemperature = t;
+  encoderValue = desiredTemperature;
   displayTemperature();
-  saveTemperature();
+  // saveTemperature();
   return desiredTemperature;
 }
 
@@ -97,6 +134,23 @@ void initScreen()
   tft.setRotation(3);
 }
 
+// Rotary encoder code by stahl
+void updateEncoder() {
+  int MSB = digitalRead(ENCODER_PIN_A); //MSB = most significant bit
+  int LSB = digitalRead(ENCODER_PIN_B); //LSB = least significant bit
+
+  int encoded = (MSB << 1) | LSB; //converting the 2 pin value to single number
+  int sum  = (lastEncoded << 2) | encoded; //adding it to the previous encoded value
+
+  if (sum == 0b1101 || sum == 0b0100 || sum == 0b0010 || sum == 0b1011)
+      encoderValue -= TEMP_INCREMENT;
+  if(sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000)
+      encoderValue += TEMP_INCREMENT;
+
+  lastEncoded = encoded; //store this value for next time
+  encoderValue = min(max(encoderValue, TEMP_MIN), TEMP_MAX);
+}
+
 void setup()
 {
 #ifdef USE_DS18B20
@@ -117,14 +171,20 @@ void setup()
   Serial.begin(9600);
 
   loadTemperature();
-return;
+
   pinMode(FAN_PIN, OUTPUT);
   pinMode(HEAT_PIN, OUTPUT);
-  pinMode(POT_PIN, INPUT);
+
 #ifdef USE_PIR
   pinMode(PIR_PIN, INPUT);
 #endif
+
   Spark.connect();
+
+  pinMode(ENCODER_PIN_A, INPUT_PULLUP);
+  pinMode(ENCODER_PIN_B, INPUT_PULLUP);
+  attachInterrupt(ENCODER_PIN_A, updateEncoder, CHANGE);
+  attachInterrupt(ENCODER_PIN_B, updateEncoder, CHANGE);
 }
 
 void loop()
@@ -177,12 +237,8 @@ void loop()
     displayTemperature();
   }
 
-  int pot = 4095 - analogRead(POT_PIN);
   if (1000 == wait)
   {
-    Serial.print("Potentiometer reading: ");
-    Serial.println(pot);
-
 #ifdef USE_PIR
     Serial.print("PIR reading: ");
     Serial.println(analogRead(PIR_PIN));
@@ -197,19 +253,10 @@ void loop()
   }
 #endif
 
-  // If user has adjusted the potentiometer
-  if (fabsf(pot - lastChangedPot) > 64)
-  {
-    // Don't set temp on boot
-    if (lastChangedPot >= 0)
-    {
-      // map 0-4095 pot range to 50-90 temperature range
-      int t = roundf(pot * (40.0/4095.0) + 50.0);
-      setTemperature(t);
-      Serial.print("Setting desired temp based on potentiometer to ");
-      Serial.println(t);
-    }
-    lastChangedPot = pot;
+  if (encoderValue != desiredTemperature) {
+    setTemperature(encoderValue);
+    Serial.print("Setting desired temp based on encoder to ");
+    Serial.println(encoderValue);
   }
 
   isHeatOn = desiredTemperature > currentTemperature;
