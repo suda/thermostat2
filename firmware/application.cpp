@@ -1,17 +1,32 @@
-#include "application.h"
-#include "Adafruit_LEDBackpack.h"
 #include <math.h>
+#include "application.h"
+#include "Adafruit_mfGFX.h"
+#include "Adafruit_ILI9341.h"
+#include "scale.h"
 
-#define TEMP_SENSOR 0x27
-#define FAN_PIN     A0
-#define HEAT_PIN    A1
-#define POT_PIN     A2
-#define PIR_PIN     A3
+// Comment out to use Honeywell HIH6131-021-001 I2C sensor
+#define USE_DS18B20
+
+#ifdef USE_DS18B20
+  #include "DS18B20.h"
+  #include "OneWire.h"
+
+  #define ONE_WIRE_PIN  A7
+
+  DS18B20 ds18b20 = DS18B20(ONE_WIRE_PIN);
+  char szInfo[64];
+#else
+  #define TEMP_SENSOR 0x27
+#endif
+#define FAN_PIN     D0
+#define HEAT_PIN    D7
+#define POT_PIN     A6
+#define PIR_PIN     D3
+// #define USE_PIR     1
 #define DESIRED_TEMP_FLASH_ADDRESS 0x80000
+// #define USE_FAHRENHEIT
 
-Adafruit_8x8matrix matrix1;
-Adafruit_8x8matrix matrix2;
-Adafruit_8x8matrix matrix3;
+Adafruit_ILI9341 tft = Adafruit_ILI9341(A2, A1, A0);
 
 static const uint8_t smile[] = {
   0b00111100,
@@ -24,6 +39,9 @@ static const uint8_t smile[] = {
   0b00111100
 };
 
+#define	COLOR_HEATING   0xF800
+#define	COLOR_COOLING   0x001F
+
 int currentTemperature = 0;
 int desiredTemperature = 0;
 bool isHeatOn = false;
@@ -31,21 +49,18 @@ bool isFanOn = false;
 bool motionDetected = false;
 
 int lastChangedPot = -80;
-
+int i = 0;
 void displayTemperature(void)
 {
-  char ones = desiredTemperature % 10;
-  char tens = (desiredTemperature / 10) % 10;
+  if (isHeatOn) tft.fillScreen(COLOR_HEATING);
+  else tft.fillScreen(COLOR_COOLING);
 
-  matrix1.clear();
-  matrix1.setCursor(0, 0);
-  matrix1.write(tens + '0');
-  matrix1.writeDisplay();
-
-  matrix2.clear();
-  matrix2.setCursor(0, 0);
-  matrix2.write(ones + '0');
-  matrix2.writeDisplay();
+  tft.drawXBitmap(43, 13, scale_bits, scale_width, scale_height, ILI9341_WHITE);
+  tft.setCursor(115, 95);
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(8);
+  // tft.println(desiredTemperature);
+  tft.println(currentTemperature);
 }
 
 void saveTemperature()
@@ -53,7 +68,7 @@ void saveTemperature()
   sFLASH_EraseSector(DESIRED_TEMP_FLASH_ADDRESS);
   Serial.println("Saving temperature to flash");
   uint8_t values[2] = { (uint8_t)desiredTemperature, 0 };
-  sFLASH_WriteBytes(values, DESIRED_TEMP_FLASH_ADDRESS, 2);
+  sFLASH_WriteBuffer(values, DESIRED_TEMP_FLASH_ADDRESS, 2);
 }
 
 void loadTemperature()
@@ -85,28 +100,22 @@ int setTemperatureFromString(String t)
   return setTemperature(t.toInt());
 }
 
-void setupMatrix(Adafruit_8x8matrix m)
+void initScreen()
 {
-  m.clear();
-  m.writeDisplay();
-  m.setTextSize(1);
-  m.setTextWrap(false);
-  m.setTextColor(LED_ON);
-  m.setRotation(0);
-  m.setCursor(0, 0);
+  // TODO
+  tft.begin();
+  tft.setRotation(3);
 }
 
 void setup()
 {
+#ifdef USE_DS18B20
+
+#else
   Wire.begin();
+#endif
 
-  matrix1.begin(0x70);
-  matrix2.begin(0x71);
-  matrix3.begin(0x72);
-
-  setupMatrix(matrix1);
-  setupMatrix(matrix2);
-  setupMatrix(matrix3);
+  initScreen();
 
   Spark.function("set_temp", setTemperatureFromString);
 
@@ -118,20 +127,35 @@ void setup()
   Serial.begin(9600);
 
   loadTemperature();
-
+return;
   pinMode(FAN_PIN, OUTPUT);
   pinMode(HEAT_PIN, OUTPUT);
   pinMode(POT_PIN, INPUT);
+#ifdef USE_PIR
   pinMode(PIR_PIN, INPUT);
+#endif
 }
 
 void loop()
 {
+#ifdef USE_DS18B20
+  if(!ds18b20.search()){
+    ds18b20.resetsearch();
+    delay(250);
+
+    return;
+  }
+#endif
+
   static int wait = 0;
   if (!wait)
   {
-    wait = 1000;
+    wait = 10;
+    float fTemp;
 
+#ifdef USE_DS18B20
+    fTemp = ds18b20.getTemperature();
+#else
     Wire.beginTransmission(TEMP_SENSOR);
     Wire.endTransmission();
     delay(40);
@@ -149,11 +173,17 @@ void loop()
     int temp = (Wire.read() << 6) & 0x3fc0;
     temp |= Wire.read() >> 2;
     temp *= 165;
-    float fTemp = temp / 16383.0 - 40.0;
+    fTemp = temp / 16383.0 - 40.0;
+#endif
+
+#ifdef USE_FAHRENHEIT
     fTemp = fTemp * 1.8 + 32.0; // convert to fahrenheit
+#endif
+
     currentTemperature = roundf(fTemp);
     Serial.print("Temperature is ");
     Serial.println(fTemp);
+    displayTemperature();
   }
 
   int pot = 4095 - analogRead(POT_PIN);
@@ -162,15 +192,19 @@ void loop()
     Serial.print("Potentiometer reading: ");
     Serial.println(pot);
 
+#ifdef USE_PIR
     Serial.print("PIR reading: ");
     Serial.println(analogRead(PIR_PIN));
+#endif
   }
 
+#ifdef USE_PIR
   if (3550 < analogRead(PIR_PIN))
   {
     motionDetected = true;
     // lean more toward comfort than energy efficiency
   }
+#endif
 
   // If user has adjusted the potentiometer
   if (fabsf(pot - lastChangedPot) > 64)

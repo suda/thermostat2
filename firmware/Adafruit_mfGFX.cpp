@@ -6,7 +6,7 @@ paired with a hardware-specific library for each display device we carry
 
 Adafruit invests time and resources providing this open source code, please
 support Adafruit & open-source hardware by purchasing products from Adafruit!
- 
+
 Copyright (c) 2013 Adafruit Industries.  All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -31,13 +31,12 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include "Adafruit_GFX.h"
-#include "glcdfont.c"
-#ifdef __AVR__
- #include <avr/pgmspace.h>
-#else
- #define pgm_read_byte(addr) (*(const unsigned char *)(addr))
-#endif
+#include "Adafruit_mfGFX.h"
+#include "fonts.h"
+
+
+#define pgm_read_byte(addr) (*(const uint8_t *)(addr))
+
 
 Adafruit_GFX::Adafruit_GFX(int16_t w, int16_t h):
   WIDTH(w), HEIGHT(h)
@@ -49,6 +48,53 @@ Adafruit_GFX::Adafruit_GFX(int16_t w, int16_t h):
   textsize  = 1;
   textcolor = textbgcolor = 0xFFFF;
   wrap      = true;
+  // Default to GLCDFONT to be compatible with existing code
+  setFont(GLCDFONT);		// May also be set to TIMESNR_8, CENTURY_8, COMICS_8 or TEST (for testing candidate fonts)
+ }
+
+void Adafruit_GFX::setFont(uint8_t f) {
+  font = f;
+  switch(font) {
+    case TIMESNR_8:
+      fontData = timesNewRoman_8ptBitmaps;
+	  fontDesc = timesNewRoman_8ptDescriptors;
+      fontKern = 1;
+      break;
+    case CENTURY_8:
+      fontData = centuryGothic_8ptBitmaps;
+	  fontDesc = centuryGothic_8ptDescriptors;
+      fontKern = 1;
+      break;
+    case ARIAL_8:
+      fontData = arial_8ptBitmaps;
+	  fontDesc = arial_8ptDescriptors;
+      fontKern = 1;
+      break;
+    case COMICS_8:
+      fontData = comicSansMS_8ptBitmaps;
+	  fontDesc = comicSansMS_8ptDescriptors;
+      fontKern = 1;
+      break;
+    case GLCDFONT:
+      fontData = glcdfontBitmaps;
+	  fontDesc = glcdfontDescriptors;
+      fontKern = 1;
+      break;
+    case TEST:
+      fontData = testBitmaps;
+	  fontDesc = testDescriptors;
+      fontKern = 1;
+      break;
+	default:
+      font = ARIAL_8;
+      fontData = arial_8ptBitmaps;
+	  fontDesc = arial_8ptDescriptors;
+      fontKern = 1;
+      break;
+  }
+
+  fontStart = pgm_read_byte(fontData+FONT_START);
+  fontEnd = pgm_read_byte(fontData+FONT_END);
 }
 
 // Draw a circle outline
@@ -74,7 +120,7 @@ void Adafruit_GFX::drawCircle(int16_t x0, int16_t y0, int16_t r,
     x++;
     ddF_x += 2;
     f += ddF_x;
-  
+
     drawPixel(x0 + x, y0 + y, color);
     drawPixel(x0 - x, y0 + y, color);
     drawPixel(x0 + x, y0 - y, color);
@@ -106,7 +152,7 @@ void Adafruit_GFX::drawCircleHelper( int16_t x0, int16_t y0,
     if (cornername & 0x4) {
       drawPixel(x0 + x, y0 + y, color);
       drawPixel(x0 + y, y0 + x, color);
-    } 
+    }
     if (cornername & 0x2) {
       drawPixel(x0 + x, y0 - y, color);
       drawPixel(x0 + y, y0 - x, color);
@@ -363,55 +409,96 @@ void Adafruit_GFX::drawBitmap(int16_t x, int16_t y,
   }
 }
 
+//Draw XBitMap Files (*.xbm), exported from GIMP,
+//Usage: Export from GIMP to *.xbm, rename *.xbm to *.c and open in editor.
+//C Array can be directly used with this function
+void Adafruit_GFX::drawXBitmap(int16_t x, int16_t y,
+                              const uint8_t *bitmap, int16_t w, int16_t h,
+                              uint16_t color) {
+
+  int16_t i, j, byteWidth = (w + 7) / 8;
+
+  for(j=0; j<h; j++) {
+    for(i=0; i<w; i++ ) {
+      if(pgm_read_byte(bitmap + j * byteWidth + i / 8) & (1 << (i % 8))) {
+        drawPixel(x+i, y+j, color);
+      }
+    }
+  }
+}
+
 size_t Adafruit_GFX::write(uint8_t c) {
+
   if (c == '\n') {
-    cursor_y += textsize*8;
+    cursor_y += textsize*fontDesc[0].height;	//all chars are same height so use height of space char
     cursor_x  = 0;
   } else if (c == '\r') {
     // skip em
   } else {
-    drawChar(cursor_x, cursor_y, c, textcolor, textbgcolor, textsize);
-    cursor_x += textsize*6;
-    if (wrap && (cursor_x > (_width - textsize*6))) {
-      cursor_y += textsize*8;
+    drawFastChar(cursor_x, cursor_y, c, textcolor, textbgcolor, textsize);
+	uint16_t w = fontDesc[c-fontStart].width;
+	uint16_t h = fontDesc[c-fontStart].height;
+    if (fontKern > 0 && textcolor != textbgcolor) {
+      fillRect(cursor_x+w*textsize,cursor_y,fontKern*textsize,h*textsize,textbgcolor);
+    }
+    cursor_x += textsize*(w+fontKern);
+    if (wrap && (cursor_x > (_width - textsize*w))) {
+      cursor_y += textsize*h;
       cursor_x = 0;
     }
   }
   return 1;
 }
 
+void Adafruit_GFX::drawFastChar(int16_t x, int16_t y, unsigned char c,
+                                    uint16_t color, uint16_t bg, uint8_t size) {
+  // Update in subclasses if desired!
+  drawChar(x,y,c,color,bg,size);
+}
+
 // Draw a character
 void Adafruit_GFX::drawChar(int16_t x, int16_t y, unsigned char c,
 			    uint16_t color, uint16_t bg, uint8_t size) {
 
+  if (c < fontStart || c > fontEnd) {
+    c = 0;
+  }
+  else {
+    c -= fontStart;
+  }
+
   if((x >= _width)            || // Clip right
      (y >= _height)           || // Clip bottom
-     ((x + 6 * size - 1) < 0) || // Clip left
-     ((y + 8 * size - 1) < 0))   // Clip top
+     ((x + (fontDesc[c].width * size) - 1) < 0) || // Clip left
+     ((y + (fontDesc[c].height * size) - 1) < 0))   // Clip top
     return;
 
-  for (int8_t i=0; i<6; i++ ) {
+	uint8_t bitCount=0;
+  	uint16_t fontIndex = fontDesc[c].offset + 2; //((fontDesc + c)->offset) + 2;
+
+  for (int8_t i=0; i<fontDesc[c].height; i++ ) {	// i<fontHeight
     uint8_t line;
-    if (i == 5) 
-      line = 0x0;
-    else 
-      line = pgm_read_byte(font+(c*5)+i);
-    for (int8_t j = 0; j<8; j++) {
-      if (line & 0x1) {
-        if (size == 1) // default size
-          drawPixel(x+i, y+j, color);
+    for (int8_t j = 0; j<fontDesc[c].width; j++) {			//j<fontWidth
+      if (bitCount++%8 == 0) {
+        line = pgm_read_byte(fontData+fontIndex++);
+      }
+      if (line & 0x80) {
+        if (size == 1) {// default sizeFast
+          drawPixel(x+j, y+i, color);
+          }
         else {  // big size
-          fillRect(x+(i*size), y+(j*size), size, size, color);
-        } 
+          fillRect(x+(j*size), y+(i*size), size, size, color);
+        }
       } else if (bg != color) {
         if (size == 1) // default size
-          drawPixel(x+i, y+j, bg);
+          drawPixel(x+j, y+i, bg);
         else {  // big size
-          fillRect(x+i*size, y+j*size, size, size, bg);
+          fillRect(x+j*size, y+i*size, size, size, bg);
         }
       }
-      line >>= 1;
+      line <<= 1;
     }
+    bitCount = 0;
   }
 }
 
@@ -425,14 +512,14 @@ void Adafruit_GFX::setTextSize(uint8_t s) {
 }
 
 void Adafruit_GFX::setTextColor(uint16_t c) {
-  // For 'transparent' background, we'll set the bg 
+  // For 'transparent' background, we'll set the bg
   // to the same as fg instead of using a flag
   textcolor = textbgcolor = c;
 }
 
 void Adafruit_GFX::setTextColor(uint16_t c, uint16_t b) {
   textcolor   = c;
-  textbgcolor = b; 
+  textbgcolor = b;
 }
 
 void Adafruit_GFX::setTextWrap(boolean w) {
@@ -463,7 +550,7 @@ void Adafruit_GFX::setRotation(uint8_t x) {
 int16_t Adafruit_GFX::width(void) {
   return _width;
 }
- 
+
 int16_t Adafruit_GFX::height(void) {
   return _height;
 }
@@ -471,4 +558,3 @@ int16_t Adafruit_GFX::height(void) {
 void Adafruit_GFX::invertDisplay(boolean i) {
   // Do nothing, must be subclassed if supported
 }
-
