@@ -25,22 +25,12 @@
 // #define USE_PIR     1
 #define DESIRED_TEMP_FLASH_ADDRESS 0x80000
 // #define USE_FAHRENHEIT
-
-Adafruit_ILI9341 tft = Adafruit_ILI9341(A2, A1, A0);
-
-static const uint8_t smile[] = {
-  0b00111100,
-  0b01000010,
-  0b10100101,
-  0b10000001,
-  0b10100101,
-  0b10011001,
-  0b01000010,
-  0b00111100
-};
-
 #define	COLOR_HEATING   0xF800
 #define	COLOR_COOLING   0x001F
+
+SYSTEM_MODE(SEMI_AUTOMATIC);
+
+Adafruit_ILI9341 tft = Adafruit_ILI9341(A2, A1, A0);
 
 int currentTemperature = 0;
 int desiredTemperature = 0;
@@ -134,6 +124,7 @@ return;
 #ifdef USE_PIR
   pinMode(PIR_PIN, INPUT);
 #endif
+  Spark.connect();
 }
 
 void loop()
