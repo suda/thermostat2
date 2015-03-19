@@ -139,7 +139,7 @@ void displayTemperature()
 
   // Draw desired temperature
   tft.fillRect(115, 95, 90, 60, bgColor.toColor565());
-  tft.setCursor(desiredTemperature > 10 ? 115 : 145, 95);
+  tft.setCursor(desiredTemperature > 9 ? 115 : 145, 95);
   tft.setTextColor(ILI9341_WHITE);
   tft.setTextSize(8);
   tft.println(desiredTemperature);
@@ -150,7 +150,7 @@ void displayTemperature()
   if (currentTemperature > 0) {
     // Draw current temperature
     tft.fillRect(140, 200, 45, 30, bgColor.toColor565());
-    tft.setCursor(currentTemperature > 10 ? 140 : 155, 200);
+    tft.setCursor(currentTemperature > 9 ? 140 : 155, 200);
     tft.setTextSize(4);
     tft.println(currentTemperature);
 
