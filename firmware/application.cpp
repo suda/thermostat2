@@ -1,8 +1,7 @@
 #include <math.h>
 #include "application.h"
-#include "Adafruit_mfGFX.h"
 #include "Adafruit_ILI9341.h"
-#include "scale.h"
+#include "Color.h"
 
 // Comment out to use Honeywell HIH6131-021-001 I2C sensor
 #define USE_DS18B20
@@ -26,61 +25,137 @@
 // #define USE_PIR     1
 #define DESIRED_TEMP_FLASH_ADDRESS 0x80000
 // #define USE_FAHRENHEIT
-#define	COLOR_HEATING   0xF800
-#define	COLOR_COOLING   0x001F
 #define TEMP_MIN  5
 #define TEMP_MAX  40
-#define TEMP_INCREMENT 0.1
+#define TEMP_INCREMENT 0.2
+#define PI 3.14159
+#define SCALE_ANGLE 270
+#define SCALE_RADIUS 115
+#define TICK_LENGTH 15
 
 SYSTEM_MODE(SEMI_AUTOMATIC);
 
 Adafruit_ILI9341 tft = Adafruit_ILI9341(A2, A1, A0);
+
+Color ColorHeating = Color(255, 0, 0);
+Color ColorCooling = Color(0, 0, 255);
+Color ColorForeground = Color(255, 255, 255);
 
 int currentTemperature = 0;
 int desiredTemperature = 0;
 bool isHeatOn = false;
 bool isFanOn = false;
 bool motionDetected = false;
+Color bgColor = ColorCooling;
 
-int lastChangedPot = -80;
 int lastCurrentTemperature = 0;
 int lastDesiredTemperature = 0;
 bool lastIsHeatOn = false;
 volatile int lastEncoded = 0;
 volatile float encoderValue = 0;
 
-void displayTemperature(void)
+void drawLineOnArc(float angle, int radius, int length, Color color)
 {
-  bool forceRedraw = false || (lastChangedPot == -80);
+  int offsetX = (ILI9341_TFTHEIGHT / 2);
+  int offsetY = 20 + radius + length;
+
+  float x1 = radius * cos(angle * PI / 180);
+  float y1 = radius * sin(angle * PI / 180);
+  float x2 = (radius + length)  * cos(angle * PI / 180);
+  float y2 = (radius + length) * sin(angle * PI / 180);
+  tft.drawLine(offsetX + x1,
+               offsetY + y1,
+               offsetX + x2,
+               offsetY + y2,
+               color.toColor565());
+}
+
+void clearTick(int angle, int length) {
+  // Clear previous
+  for (float i=-1; i<2; i+=0.2)
+    drawLineOnArc(angle+i, SCALE_RADIUS-length, length, bgColor);
+
+  // Redraw part of scale
+  for (int i=0; i<SCALE_ANGLE; i+=2) {
+    int scaleAngle = i + 135;
+    if ((scaleAngle > angle-5) && (scaleAngle < angle+5))
+      drawLineOnArc(scaleAngle, SCALE_RADIUS-TICK_LENGTH, TICK_LENGTH, ColorForeground.applyAlpha(bgColor, 0.5));
+  }
+}
+
+void drawTick(int angle, int length, Color color) {
+  // Draw new one
+  for (float i=-1; i<2; i+=0.2)
+    drawLineOnArc(angle+i, SCALE_RADIUS-length, length, ColorForeground);
+}
+
+float tempToPercent(int temp) {
+  float tempFromZero = temp - TEMP_MIN;
+  return tempFromZero / (TEMP_MAX - TEMP_MIN);
+}
+
+void drawScaleForTemp(int current, int desired, Color color) {
+  int currentAngle = SCALE_ANGLE * tempToPercent(current) + 135;
+  int desiredAngle = SCALE_ANGLE * tempToPercent(desired) + 135;
+  int minAngle = min(currentAngle, desiredAngle);
+  int maxAngle = max(currentAngle, desiredAngle);
+  // Redraw part of scale
+  for (int i=0; i<SCALE_ANGLE; i+=2) {
+    int scaleAngle = i + 135;
+    if ((scaleAngle > minAngle) && (scaleAngle < maxAngle))
+      drawLineOnArc(scaleAngle, 100, 15, color);
+  }
+}
+
+void displayTemperature()
+{
+  bool forceRedraw = false;
+  bgColor = isHeatOn ? ColorHeating : ColorCooling;
+
   if (lastIsHeatOn != isHeatOn) forceRedraw = true;
 
   if (forceRedraw) {
-    if (isHeatOn) tft.fillScreen(COLOR_HEATING);
-    else tft.fillScreen(COLOR_COOLING);
-  }
+    tft.fillScreen(bgColor.toColor565());
 
-  if ((lastCurrentTemperature != currentTemperature)
-      || (lastDesiredTemperature != desiredTemperature)
-      || forceRedraw) {
     // Redraw scale
-    tft.drawXBitmap(43, 13, scale_bits, scale_width, scale_height, ILI9341_WHITE);
+    for (int i=0; i<SCALE_ANGLE; i+=2) {
+      int angle = i + 135;
+      drawLineOnArc(angle, 100, 15, ColorForeground.applyAlpha(bgColor, 0.5));
+    }
+  } else {
+    // Clear only what is needed
+    drawScaleForTemp(lastCurrentTemperature, lastDesiredTemperature, ColorForeground.applyAlpha(bgColor, 0.5));
+
+    int previousDesiredAngle = SCALE_ANGLE * tempToPercent(lastDesiredTemperature) + 135;
+    clearTick(previousDesiredAngle, 25);
+
+    int previousCurrentAngle = SCALE_ANGLE * tempToPercent(lastCurrentTemperature) + 135;
+    clearTick(previousCurrentAngle, TICK_LENGTH);
   }
 
-  if ((lastDesiredTemperature != desiredTemperature)
-      || forceRedraw) {
-    // Redraw desired temperature
-    tft.setCursor(115, 95);
-    tft.setTextColor(ILI9341_WHITE);
-    tft.setTextSize(8);
-    tft.println(desiredTemperature);
+  if (currentTemperature > 0) {
+    drawScaleForTemp(currentTemperature, desiredTemperature, ColorForeground);
   }
 
-  if (((lastCurrentTemperature != currentTemperature)
-      || forceRedraw) && currentTemperature > 0) {
-    // Redraw current temperature
-    tft.setCursor(140, 200);
+  // Draw desired temperature
+  tft.fillRect(115, 95, 90, 60, bgColor.toColor565());
+  tft.setCursor(desiredTemperature > 10 ? 115 : 145, 95);
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(8);
+  tft.println(desiredTemperature);
+
+  int angle = SCALE_ANGLE * tempToPercent(desiredTemperature) + 135;
+  drawTick(angle, 25, ColorForeground);
+
+  if (currentTemperature > 0) {
+    // Draw current temperature
+    tft.fillRect(140, 200, 45, 30, bgColor.toColor565());
+    tft.setCursor(currentTemperature > 10 ? 140 : 155, 200);
     tft.setTextSize(4);
     tft.println(currentTemperature);
+
+    int angle = SCALE_ANGLE * tempToPercent(currentTemperature) + 135;
+    drawTick(angle, TICK_LENGTH, ColorForeground);
   }
 
   lastCurrentTemperature = currentTemperature;
@@ -132,6 +207,7 @@ void initScreen()
   // TODO
   tft.begin();
   tft.setRotation(3);
+  tft.fillScreen(ColorCooling.toColor565());
 }
 
 // Rotary encoder code by stahl
@@ -259,8 +335,11 @@ void loop()
     Serial.println(encoderValue);
   }
 
+  bool oldIsHeatOn = isHeatOn;
   isHeatOn = desiredTemperature > currentTemperature;
-  digitalWrite(HEAT_PIN, isHeatOn);
+  digitalWrite(HEAT_PIN, !isHeatOn);
+
+  if (oldIsHeatOn != isHeatOn) displayTemperature();
 
   // just run them at the same time for now
   isFanOn = isHeatOn;
