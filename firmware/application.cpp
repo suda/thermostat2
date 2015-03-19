@@ -123,6 +123,9 @@ void displayTemperature()
       drawLineOnArc(angle, 100, 15, ColorForeground.applyAlpha(bgColor, 0.5));
     }
   } else {
+    // If nothing changed, don't redraw
+    if ((lastCurrentTemperature == currentTemperature)
+        && (lastDesiredTemperature == desiredTemperature)) return;
     // Clear only what is needed
     drawScaleForTemp(lastCurrentTemperature, lastDesiredTemperature, ColorForeground.applyAlpha(bgColor, 0.5));
 
