@@ -1,22 +1,20 @@
-Spark Open Source Thermostat
-============================
+Spark Open Source Thermostat V2
+===============================
 
-This repo contains all of the software goodies produced in a 18-hour Spark Team Hackaton described in detail on the [Spark Blog](http://blog.spark.io/2014/01/17/open-source-thermostat).
+![](https://igcdn-photos-g-a.akamaihd.net/hphotos-ak-xaf1/t51.2885-15/11032996_1564809190453678_79569625_n.jpg)
 
-
+This repo contains all of the software and hardware designs required to run your own open source thermostat. This is successor to [spark/thermostat](https://github.com/spark/thermostat).
 
 ## Hardware
 
-The thermostat display is composed of 3
-[Adafruit Mini 8x8 LED Matrix boards](http://www.adafruit.com/products/870#Technical_Details).
+The thermostat display is a [2.2" Serial SPI TFT Color LCD](http://www.dx.com/p/2-2-serial-spi-tft-color-lcd-module-for-arduino-red-silver-234675?Utm_rid=62061796&Utm_source=affiliate).
 
-The temperature and humidity are sensed using a
-[Honeywell HIH6131-021-001](http://www.digikey.com/product-detail/en/HIH6131-021-001/480-3652-6-ND/2704706).
+The temperature is sensed using a
+[DS18B20](http://www.dx.com/p/ds18b20-digital-temperature-sensor-module-for-arduino-55-125-c-135047?Utm_rid=62061796&Utm_source=affiliate).
 
-These are all controlled by the Spark Core using a
-common I2C bus where pin D0 is SDA and pin D1 is SCL.
-The displays (from left to right) are on I2C addresses
-0x70, 0x71, and 0x72.
+User input is recognized using [Rotary Incremental Encoder](http://www.dx.com/p/volume-control-pulse-potentiometer-knob-360-rotary-incremental-encoder-module-for-arduino-board-331559?Utm_rid=62061796&Utm_source=affiliate).
+
+Heater/fan is being driven using [Opto-isolated Relay](http://www.dx.com/p/jtron-1-channel-opto-isolated-relay-module-isolation-module-black-270934?Utm_rid=62061796&Utm_source=affiliate).
 
 ### Schematic
 
@@ -30,10 +28,9 @@ If you're viewing this on GitHub (and using a modern browser), you can [view a 3
 
 ## Firmware
 
-To build firmware for this product, you'll first need to be able to build Spark Core firmware by following the instructions
-[shown here](https://github.com/spark/core-firmware).
+To build firmware for this product, you'll first need [Spark Dev](https://www.spark.io/dev).
 
-Once you have that working, you can simply copy all of the files from `/firmware` in this repo into `core-firmware/src` and run `make` again to build.  (i.e. `cp thermostat/firmware/* core-firmware/src`)
+Once you have that, you can simply open `/firmware` directory from this repo and compile/flash.
 
 Alternatively, you could use the [Spark Web IDE](https://www.spark.io).
 
@@ -87,6 +84,7 @@ Get your hack on, :), have fun. If you do something cool with anything in here, 
 
 Check out some of these other related open thermostat projects:
 
+* https://github.com/spark/thermostat
 * https://github.com/science/openthermo
 * http://www.adafruit.com/blog/2014/01/13/ardustat-web-controlled-wireless-arduino-based-thermostat-featuring-adafruit-cc3000-arduino/
 * http://thermostatmonitor.com/
